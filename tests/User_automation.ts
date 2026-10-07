@@ -1476,9 +1476,9 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
             timeout: 10000
         });
 
-        let extensionNumber = 9001;
+        let extensionNumber = 1001;
         let extensionAvailable = false;
-        const maxExtensionAttempts = 50;
+        const maxExtensionAttempts = 100;
 
         const getExtensionValidationText = async () => {
             const texts: string[] = [];
