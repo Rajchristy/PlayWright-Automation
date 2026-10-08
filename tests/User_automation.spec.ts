@@ -781,6 +781,601 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
         }
     };
 
+    // ==================================================
+    // ADMIN -> CREATE DYNAMIC SUPERVISOR -> LOGOUT -> LOGIN
+    // ==================================================
+    const adminApplicationUsername =
+        process.env.INTALK_ADMIN_USERNAME || 'admin';
+
+    const adminApplicationPassword =
+        process.env.INTALK_ADMIN_PASSWORD || '';
+
+    const supervisorPassword =
+        process.env.INTALK_SUPERVISOR_PASSWORD || 'Test@12345';
+
+    let createdSupervisorUsername = '';
+
+    const loginWithAdmin = async () => {
+        if (!adminApplicationPassword) {
+            throw new Error(
+                'INTALK_ADMIN_PASSWORD is not set. Export the Intalk Admin password before running the test.'
+            );
+        }
+
+        console.log(`Logging in with Admin user: ${adminApplicationUsername}`);
+
+        await page.getByLabel('User ID').fill(adminApplicationUsername);
+        await hold();
+
+        await page.locator('input[type="password"]').first().fill(adminApplicationPassword);
+        await hold();
+
+        await page.getByRole('button', { name: /login/i }).click();
+        await hold();
+
+        const forceLoginOption = page.getByText('Force Login', { exact: true }).first();
+
+        if (
+            await forceLoginOption.count() > 0 &&
+            await forceLoginOption.isVisible().catch(() => false)
+        ) {
+            console.log('Admin Force Login option detected. Clicking...');
+            await forceLoginOption.click();
+            await hold();
+        }
+
+        console.log('Admin login completed.');
+    };
+
+    const openUsersModule = async () => {
+        console.log('Opening Settings -> Users under current logged-in user...');
+
+        // Wait for the post-login dashboard/navigation to render.
+        await page.waitForTimeout(1200);
+
+        // --------------------------------------------------
+        // HOVER LEFT NAVIGATION PANEL
+        // --------------------------------------------------
+        const viewport = await page.evaluate(() => ({
+            width: window.innerWidth,
+            height: window.innerHeight
+        })).catch(() => ({
+            width: 1920,
+            height: 1080
+        }));
+
+        // Move into the left navigation area, not the account area.
+        await page.mouse.move(35, Math.max(120, viewport.height / 2));
+        await hold();
+
+        // --------------------------------------------------
+        // FIND SETTINGS IN THE LEFT NAVIGATION
+        // --------------------------------------------------
+        // The page can contain more than one "Settings" text
+        // (for example, breadcrumb/content). Prefer the navigation link.
+        let settingsMenu = page
+            .locator('nav')
+            .getByRole('link', { name: 'Settings', exact: true })
+            .first();
+
+        if (
+            await settingsMenu.count() === 0 ||
+            !(await settingsMenu.isVisible().catch(() => false))
+        ) {
+            settingsMenu = page
+                .locator('a[href="/intalk/settings"]')
+                .first();
+        }
+
+        if (
+            await settingsMenu.count() === 0 ||
+            !(await settingsMenu.isVisible().catch(() => false))
+        ) {
+            // Final fallback: exact Settings text.
+            settingsMenu = page
+                .getByText('Settings', { exact: true })
+                .first();
+        }
+
+        await expect(settingsMenu).toBeVisible({
+            timeout: 15000
+        });
+
+        console.log('Settings menu found. Clicking Settings...');
+        await settingsMenu.hover();
+        await hold();
+        await settingsMenu.click();
+        await hold();
+
+        // --------------------------------------------------
+        // WAIT FOR SETTINGS PAGE
+        // --------------------------------------------------
+        await page.waitForURL(
+            /\/intalk\/settings(?:\/|$)/,
+            { timeout: 15000 }
+        ).catch(() => {});
+
+        await page.waitForTimeout(1000);
+
+        // --------------------------------------------------
+        // FIND USERS IN SETTINGS
+        // --------------------------------------------------
+        let usersMenu = page
+            .locator('nav')
+            .getByRole('link', { name: 'Users', exact: true })
+            .first();
+
+        if (
+            await usersMenu.count() === 0 ||
+            !(await usersMenu.isVisible().catch(() => false))
+        ) {
+            usersMenu = page
+                .getByRole('link', { name: 'Users', exact: true })
+                .first();
+        }
+
+        if (
+            await usersMenu.count() === 0 ||
+            !(await usersMenu.isVisible().catch(() => false))
+        ) {
+            usersMenu = page
+                .getByText('Users', { exact: true })
+                .first();
+        }
+
+        await expect(usersMenu).toBeVisible({
+            timeout: 15000
+        });
+
+        console.log('Users menu found. Clicking Users...');
+        await usersMenu.hover();
+        await hold();
+        await usersMenu.click();
+        await hold();
+
+        await page.waitForURL(
+            /\/intalk\/settings\/users/,
+            { timeout: 15000 }
+        ).catch(() => {});
+
+        await page.waitForTimeout(1000);
+
+        console.log('Users module opened.');
+    };
+
+    const createSupervisorFromAdmin = async () => {
+        const baseUsername = 'raj_christy_supervisor';
+        const maxSupervisorAttempts = 100;
+
+        // Open the Add User form only once. If a username is duplicated,
+        // keep the same form open and replace the username with the next one.
+        const addUserButton = page.getByRole('button', { name: /add user/i });
+        await expect(addUserButton).toBeVisible({ timeout: 10000 });
+
+        if (!(await addUserButton.isEnabled().catch(() => false))) {
+            throw new Error(
+                'Pleasea check User creation permision not avilable or Licens for create user are exisd'
+            );
+        }
+
+        await addUserButton.click();
+        await hold();
+
+        await expect(
+            page.getByText('Add User', { exact: true })
+        ).toBeVisible({ timeout: 10000 });
+
+        const supervisorUsernameField = page.getByLabel('Username').first();
+
+        for (let attempt = 0; attempt < maxSupervisorAttempts; attempt++) {
+            const candidateUsername =
+                attempt === 0
+                    ? baseUsername
+                    : `${baseUsername}${String(attempt).padStart(2, '0')}`;
+
+            console.log(`Trying supervisor username: ${candidateUsername}`);
+
+            // Always clear the previous username and enter the new candidate.
+            await supervisorUsernameField.fill('');
+            await hold();
+            await supervisorUsernameField.fill(candidateUsername);
+            await hold();
+
+            // Give the application time to run its username validation.
+            await page.waitForTimeout(800);
+
+            // --------------------------------------------------
+            // DUPLICATE USERNAME VALIDATION
+            // --------------------------------------------------
+            // IMPORTANT: Do NOT close the Add User form here.
+            // Just erase the existing username and enter the next one.
+            const usernameAlreadyInUse = page.getByText(
+                'Username is already in use',
+                { exact: true }
+            ).first();
+
+            if (
+                await usernameAlreadyInUse.count() > 0 &&
+                await usernameAlreadyInUse.isVisible().catch(() => false)
+            ) {
+                console.log(
+                    `Username ${candidateUsername} is already in use. ` +
+                    `Keeping Add User form open and trying the next username...`
+                );
+
+                await supervisorUsernameField.fill('');
+                await hold();
+                continue;
+            }
+
+            // Fallback in case the application renders the validation
+            // text with slightly different spacing/capitalization.
+            const usernameFieldContainer = supervisorUsernameField.locator(
+                'xpath=..'
+            );
+
+            const usernameFieldErrorText = (
+                await usernameFieldContainer.innerText().catch(() => '')
+            )
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (/username\s+is\s+already\s+in\s+use/i.test(usernameFieldErrorText)) {
+                console.log(
+                    `Username ${candidateUsername} is already in use. ` +
+                    `Keeping Add User form open and trying the next username...`
+                );
+
+                await supervisorUsernameField.fill('');
+                await hold();
+                continue;
+            }
+
+            // --------------------------------------------------
+            // FILL THE REST OF THE SUPERVISOR FORM
+            // --------------------------------------------------
+            await page.locator('input[type="password"]').nth(0).fill(supervisorPassword);
+            await hold();
+            await page.locator('input[type="password"]').nth(1).fill(supervisorPassword);
+            await hold();
+
+            const usageTypeDropdown = page.getByRole('combobox').nth(0);
+            await usageTypeDropdown.click();
+            await hold();
+            await page.getByRole('option', {
+                name: 'Callcenter',
+                exact: true
+            }).click();
+            await hold();
+
+            // Supervisor uses WebRTC for the supervisor account.
+            const endpointDropdown = page.getByRole('combobox').nth(1);
+            await endpointDropdown.click();
+            await hold();
+
+            const webRtcOption = page.getByRole('option', {
+                name: 'WebRTC',
+                exact: true
+            }).first();
+
+            await expect(webRtcOption).toBeVisible({ timeout: 10000 });
+            await webRtcOption.click();
+            await hold();
+
+            const mobileField = page.getByLabel('Mobile Number').first();
+            await expect(mobileField).toBeVisible({ timeout: 10000 });
+            await mobileField.fill(
+                `9206759${String(attempt + 1).padStart(3, '0')}`
+            );
+            await hold();
+
+            await page.getByLabel('First Name').fill('Raj');
+            await hold();
+
+            await page.getByLabel('Last Name').fill('Christy');
+            await hold();
+
+            // Group Type = Supervisor.
+            const groupTypeDropdown = page.locator(
+                '#mui-component-select-group_type'
+            );
+
+            await expect(groupTypeDropdown).toBeVisible({
+                timeout: 10000
+            });
+
+            await groupTypeDropdown.click();
+            await hold();
+
+            await page.getByRole('option', {
+                name: 'Supervisor',
+                exact: true
+            }).click();
+            await hold();
+
+            // Select the first available Supervisor group.
+            const groupDropdown = page.locator(
+                '#mui-component-select-group_uuid'
+            );
+
+            await expect(groupDropdown).toBeVisible({
+                timeout: 10000
+            });
+
+            await groupDropdown.click();
+            await hold();
+
+            const groupOptions = page.getByRole('option');
+
+            const groupTexts = (await groupOptions.allTextContents())
+                .map(v => v.trim())
+                .filter(v => v && !/^select/i.test(v));
+
+            if (groupTexts.length === 0) {
+                throw new Error(
+                    'No Supervisor Group option is available while creating the supervisor.'
+                );
+            }
+
+            await page.getByRole('option', {
+                name: groupTexts[0],
+                exact: true
+            }).click();
+            await hold();
+
+            const emailField = page.getByLabel('Email').first();
+
+            await emailField.fill(
+                `rajchristysupervisor${String(attempt + 1).padStart(2, '0')}@example.com`
+            );
+            await emailField.press('Tab').catch(() => {});
+            await hold();
+
+            const saveButton = page.getByRole('button', {
+                name: /^save$/i
+            });
+
+            await expect(saveButton).toBeVisible({
+                timeout: 10000
+            });
+
+            await expect(saveButton).toBeEnabled({
+                timeout: 10000
+            });
+
+            const responses: Array<{
+                url: string;
+                status: number;
+                body: string;
+            }> = [];
+
+            const responseHandler = async (response: any) => {
+                const resourceType = response.request().resourceType();
+                const contentType =
+                    (await response.headerValue('content-type').catch(() => '')) || '';
+
+                if (
+                    !['xhr', 'fetch'].includes(resourceType) &&
+                    !/json|text/i.test(contentType)
+                ) {
+                    return;
+                }
+
+                let body = '';
+
+                try {
+                    body = await response.text();
+                } catch {
+                    body = '';
+                }
+
+                responses.push({
+                    url: response.url(),
+                    status: response.status(),
+                    body: body.slice(0, 3000)
+                });
+            };
+
+            page.on('response', responseHandler);
+
+            try {
+                await saveButton.click();
+                await hold();
+                await page.waitForTimeout(3000);
+            } finally {
+                page.off('response', responseHandler);
+            }
+
+            const successMessage = page.getByText(
+                /User inserted successfully/i
+            ).first();
+
+            if (
+                await successMessage.count() > 0 &&
+                await successMessage.isVisible().catch(() => false)
+            ) {
+                createdSupervisorUsername = candidateUsername;
+
+                console.log(
+                    `SUCCESS: Supervisor created: ${createdSupervisorUsername}`
+                );
+
+                return;
+            }
+
+            const visibleText = (
+                await page.locator('body').innerText().catch(() => '')
+            )
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const usernameDuplicate =
+                /(?:username|user\s*name).{0,100}(?:already\s*(?:exists|in\s*use|used|registered)|duplicate)|(?:already\s*(?:exists|in\s*use|used|registered)|duplicate).{0,100}(?:username|user\s*name)/i.test(
+                    visibleText
+                );
+
+            if (usernameDuplicate) {
+                console.log(
+                    `Username ${candidateUsername} is already in use after Save. ` +
+                    `Keeping the Add User form open and entering the next username.`
+                );
+
+                // The modal is intentionally NOT closed.
+                // Clear only the username and continue with the next candidate.
+                await supervisorUsernameField.fill('');
+                await hold();
+
+                continue;
+            }
+
+            const apiDetails = responses
+                .map(r => `${r.status} ${r.url} ${r.body}`)
+                .join(' | ');
+
+            throw new Error(
+                `Supervisor creation failed for ${candidateUsername}. ` +
+                `UI: ${visibleText.slice(0, 2500)} ` +
+                `API: ${apiDetails.slice(0, 5000)}`
+            );
+        }
+
+        throw new Error(
+            `Could not create a unique supervisor after ${maxSupervisorAttempts} attempts.`
+        );
+    };
+
+    const logoutCurrentUser = async () => {
+        console.log('Logging out Admin using the UI...');
+
+        // --------------------------------------------------
+        // STEP 1: HOVER THE BOTTOM OF THE LEFT PANEL
+        // --------------------------------------------------
+        const viewport = await page.evaluate(() => ({
+            width: window.innerWidth,
+            height: window.innerHeight
+        })).catch(() => ({
+            width: 1920,
+            height: 1080
+        }));
+
+        await page.mouse.move(
+            40,
+            Math.max(100, viewport.height - 60)
+        );
+        await hold();
+
+        console.log(
+            'Hovered the bottom area of the left navigation panel.'
+        );
+
+        // --------------------------------------------------
+        // STEP 2: FIND THE ACTUAL ADMIN ACCOUNT CONTAINER
+        // --------------------------------------------------
+        // From the Playwright snapshot the account is NOT exposed as
+        // a standalone "Admin" button/text. It is a clickable generic
+        // containing:
+        //
+        //   a
+        //   admin
+        //   superadmin
+        //
+        // Therefore use the "admin" heading and walk up to its
+        // clickable account container.
+        const adminHeading = page.getByRole('heading', {
+            name: 'admin',
+            exact: true
+        }).last();
+
+        await expect(adminHeading).toBeVisible({
+            timeout: 10000
+        });
+
+        // Parent of heading = account text container.
+        // Parent again = clickable Admin account container with the
+        // dropdown arrow beside it.
+        const adminAccountContainer = adminHeading.locator(
+            'xpath=../..'
+        );
+
+        await expect(adminAccountContainer).toBeVisible({
+            timeout: 10000
+        });
+
+        console.log(
+            'Admin account container with dropdown arrow found.'
+        );
+
+        // Hover the actual account container so the bottom-left account
+        // area is definitely active.
+        await adminAccountContainer.hover();
+        await hold();
+
+        // --------------------------------------------------
+        // STEP 3: CLICK ADMIN / DOWN-ARROW ACCOUNT AREA
+        // --------------------------------------------------
+        console.log(
+            'Clicking the Admin account dropdown area...'
+        );
+
+        await adminAccountContainer.click();
+        await hold();
+
+        // --------------------------------------------------
+        // STEP 4: CLICK SIGN OUT
+        // --------------------------------------------------
+        console.log(
+            'Admin dropdown opened. Looking for Sign Out...'
+        );
+
+        const signOut = page.getByText(
+            /^sign\s*out$/i
+        ).last();
+
+        await expect(signOut).toBeVisible({
+            timeout: 10000
+        });
+
+        await signOut.click();
+        await hold();
+
+        // Verify that logout returned us to the login page.
+        await expect(
+            page.getByLabel('User ID')
+        ).toBeVisible({
+            timeout: 15000
+        });
+
+        console.log(
+            'Admin signed out successfully.'
+        );
+    };
+
+    const loginWithCreatedSupervisor = async () => {
+        if (!createdSupervisorUsername) {
+            throw new Error('Supervisor username was not captured after creation.');
+        }
+
+        console.log(`Logging in with created supervisor: ${createdSupervisorUsername}`);
+
+        await page.getByLabel('User ID').fill(createdSupervisorUsername);
+        await hold();
+        await page.locator('input[type="password"]').first().fill(supervisorPassword);
+        await hold();
+        await page.getByRole('button', { name: /login/i }).click();
+        await hold();
+
+        const forceLoginOption = page.getByText('Force Login', { exact: true }).first();
+        if (
+            await forceLoginOption.count() > 0 &&
+            await forceLoginOption.isVisible().catch(() => false)
+        ) {
+            await forceLoginOption.click();
+            await hold();
+        }
+
+        console.log(`SUCCESS: Logged in as ${createdSupervisorUsername}.`);
+    };
+
     const loginWithBatSuper = async () => {
         await page.getByLabel('User ID').fill('bat_super');
         await hold();
@@ -822,45 +1417,21 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
         }
     };
 
-    await loginWithBatSuper();
+    await loginWithAdmin();
+    await openUsersModule();
+    await createSupervisorFromAdmin();
+    await logoutCurrentUser();
+    await loginWithCreatedSupervisor();
 
     // ==================================================
-    // 4. MOVE MOUSE TO LEFT PANEL
+    // 4-6. AFTER SUPERVISOR LOGIN, EXPLICITLY OPEN:
+    //      LEFT PANEL -> SETTINGS -> USERS
     // ==================================================
-    await page.mouse.move(10, 300);
-    await hold();
+    // Login normally lands on the dashboard. Do not assume that
+    // the Users page remains open from the Admin session.
+    await openUsersModule();
 
-    // ==================================================
-    // 5. CLICK SETTINGS
-    // ==================================================
-    const settingsMenu = page
-        .getByText('Settings', { exact: true })
-        .first();
-
-    await expect(settingsMenu).toBeVisible({
-        timeout: 10000
-    });
-
-    await hold();
-
-    await settingsMenu.click();
-    await hold();
-
-    // ==================================================
-    // 6. CLICK USERS
-    // ==================================================
-    const usersMenu = page
-        .getByText('Users', { exact: true })
-        .first();
-
-    await expect(usersMenu).toBeVisible({
-        timeout: 10000
-    });
-
-    await hold();
-
-    await usersMenu.click();
-    await hold();
+    console.log(`Continuing regular user flow as ${createdSupervisorUsername}.`);
 
     // ==================================================
     // HELPER: SEARCH AUTOMATION USERS
@@ -1167,6 +1738,307 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
     };
 
     // ==================================================
+    // ADMINER: DELETE OLD RC USER EXTENSIONS
+    // Runs only AFTER the UI user cleanup.
+    // ==================================================
+    const cleanupRcUserExtensionsInAdminer = async () => {
+        const adminPage = await page.context().newPage();
+        let adminerPage = adminPage;
+
+        try {
+            console.log('Opening mgmt.php for Adminer extension cleanup...');
+
+            const mgmtHold = async () => {
+                if (adminPage.isClosed()) {
+                    throw new Error('Admin management page was closed unexpectedly.');
+                }
+                await adminPage.waitForTimeout(600);
+            };
+
+            await adminPage.addInitScript(() => {
+                localStorage.clear();
+                sessionStorage.clear();
+            });
+
+            await adminPage.goto('https://qaui.intalk.cc/mgmt.php?logout=1', {
+                waitUntil: 'domcontentloaded'
+            });
+            await mgmtHold();
+
+            const clickSafely = async (locator: any) => {
+                try {
+                    await locator.click({ force: true, timeout: 5000 });
+                } catch {
+                    await locator.evaluate((el: HTMLElement) => {
+                        el.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window
+                        }));
+                    });
+                }
+            };
+
+            const adminUsername = adminPage.locator('input[name="username"], input#username').first();
+            const adminPassword = adminPage.locator('input[name="password"]').first();
+
+            await adminUsername.waitFor({ state: 'visible', timeout: 15000 });
+            await adminUsername.fill('admin');
+            await mgmtHold();
+
+            await adminPassword.waitFor({ state: 'visible', timeout: 15000 });
+            await adminPassword.fill('Agami@12');
+            await mgmtHold();
+
+            const adminLoginButton = adminPage.locator('button#btn_login, button[type="submit"]').filter({
+                hasText: /sign in|login|log in/i
+            }).first();
+
+            await adminLoginButton.waitFor({ state: 'visible', timeout: 15000 });
+            await clickSafely(adminLoginButton);
+            await mgmtHold();
+
+            const advanceLink = adminPage.locator('a,button,span').filter({ hasText: /^Advanced$/i }).first();
+            await advanceLink.waitFor({ state: 'visible', timeout: 20000 });
+            await clickSafely(advanceLink);
+            await mgmtHold();
+
+            const adminerLink = adminPage.locator('a,button,span').filter({ hasText: /^Adminer$/i }).first();
+            await adminerLink.waitFor({ state: 'visible', timeout: 20000 });
+
+            console.log('Opening Adminer...');
+            const newAdminerPagePromise = adminPage.context().waitForEvent('page', { timeout: 10000 }).catch(() => null);
+            await clickSafely(adminerLink);
+            const newAdminerPage = await newAdminerPagePromise;
+
+            if (newAdminerPage) {
+                adminerPage = newAdminerPage;
+                console.log('SUCCESS: Adminer opened in a new tab.');
+            } else {
+                console.log('Adminer opened in the existing management tab.');
+            }
+
+            await adminerPage.waitForLoadState('domcontentloaded').catch(() => {});
+            await adminerPage.waitForTimeout(600);
+
+            // Adminer login if the login page is shown.
+            const authUsername = adminerPage.locator('input[name="auth[username]"]').first();
+            if (await authUsername.count() > 0 && await authUsername.isVisible().catch(() => false)) {
+                const systemSelect = adminerPage.locator('select').first();
+                if (await systemSelect.count() > 0 && await systemSelect.isVisible().catch(() => false)) {
+                    const currentSystem = await systemSelect.inputValue().catch(() => '');
+                    if (!/mysql/i.test(currentSystem)) {
+                        await systemSelect.selectOption({ label: 'MySQL' }).catch(async () => {
+                            await systemSelect.selectOption({ value: 'mysql' });
+                        });
+                        await mgmtHold();
+                    }
+                }
+
+                const server = adminerPage.locator('input[name="auth[server]"]').first();
+                if (await server.count() > 0) {
+                    await server.fill('192.168.2.88');
+                    await mgmtHold();
+                }
+
+                await authUsername.fill('opencc');
+                await mgmtHold();
+
+                const password = adminerPage.locator('input[name="auth[password]"]').first();
+                await password.fill('opencc');
+                await mgmtHold();
+
+                const database = adminerPage.locator('input[name="auth[db]"]').first();
+                await database.fill('opencc');
+                await mgmtHold();
+
+                const login = adminerPage.locator('input[type="submit"][value="Login"], button[type="submit"]').first();
+                await login.waitFor({ state: 'visible', timeout: 15000 });
+                await login.click();
+                await adminerPage.waitForLoadState('domcontentloaded').catch(() => {});
+                await adminerPage.waitForTimeout(600);
+            }
+
+            console.log('Adminer login completed.');
+
+            // ==================================================
+            // CLICK SQL COMMAND ON LEFT PANEL
+            // ==================================================
+            const sqlCommandCandidates = [
+                adminerPage.getByText(/SQL command/i).first(),
+                adminerPage.getByText(/^SQL$/i).first(),
+                adminerPage.locator('a[href*="sql" i]').first(),
+                adminerPage.locator('[title*="SQL" i]').first()
+            ];
+
+            let sqlCommand: any = null;
+            for (const candidate of sqlCommandCandidates) {
+                if (await candidate.count() > 0 && await candidate.isVisible().catch(() => false)) {
+                    sqlCommand = candidate;
+                    break;
+                }
+            }
+
+            if (!sqlCommand) {
+                throw new Error('SQL Command option was not found in the Adminer left panel.');
+            }
+
+            await clickSafely(sqlCommand);
+            await adminerPage.waitForLoadState('domcontentloaded').catch(() => {});
+            await mgmtHold();
+
+            console.log('SQL Command page opened.');
+
+            // ==================================================
+            // ENTER EXACT EXTENSION CLEANUP QUERY
+            // ==================================================
+            // --------------------------------------------------
+            // ENTER SQL INTO ADMINER
+            // --------------------------------------------------
+            // Adminer 4.8.1 submits textarea[name="query"].
+            // CodeMirror may hide that textarea, so we update BOTH the
+            // visible editor (when present) and the real submitted field.
+            const sqlQuery = `DELETE FROM v_extensions
+WHERE extension LIKE '%RC_User%'
+LIMIT 1000;`;
+
+            const queryTextarea = adminerPage
+                .locator('textarea[name="query"]')
+                .first();
+
+            await expect(queryTextarea).toHaveCount(1, {
+                timeout: 10000
+            });
+
+            console.log('Adminer query textarea found.');
+
+            const codeMirror = adminerPage
+                .locator('.CodeMirror')
+                .first();
+
+            if (await codeMirror.count() > 0) {
+                console.log('CodeMirror detected.');
+
+                await codeMirror.evaluate(
+                    (element, query) => {
+                        const cm = (element as any).CodeMirror;
+
+                        if (cm && typeof cm.setValue === 'function') {
+                            cm.setValue(query as string);
+                            cm.focus();
+                            cm.refresh();
+                        }
+                    },
+                    sqlQuery
+                ).catch(() => {});
+            }
+
+            // CRITICAL: update the actual textarea Adminer submits.
+            const textareaValue = await queryTextarea.evaluate(
+                (element, query) => {
+                    const textarea = element as HTMLTextAreaElement;
+
+                    const setter = Object.getOwnPropertyDescriptor(
+                        HTMLTextAreaElement.prototype,
+                        'value'
+                    )?.set;
+
+                    if (setter) {
+                        setter.call(textarea, query as string);
+                    } else {
+                        textarea.value = query as string;
+                    }
+
+                    textarea.dispatchEvent(
+                        new Event('input', { bubbles: true })
+                    );
+                    textarea.dispatchEvent(
+                        new Event('change', { bubbles: true })
+                    );
+
+                    return textarea.value;
+                },
+                sqlQuery
+            );
+
+            console.log(
+                `Adminer query textarea value: ${textareaValue}`
+            );
+
+            await mgmtHold();
+
+            const actualQuery = await queryTextarea.evaluate(
+                el => (el as HTMLTextAreaElement).value
+            );
+
+            if (
+                !actualQuery.includes('DELETE FROM') ||
+                !actualQuery.includes('v_extensions') ||
+                !actualQuery.includes('%RC_User%')
+            ) {
+                await adminerPage.screenshot({
+                    path: 'test-results/adminer-query-not-set.png',
+                    fullPage: true
+                }).catch(() => {});
+
+                throw new Error(
+                    `Adminer query field was not populated correctly. Actual value: ${actualQuery}`
+                );
+            }
+
+            console.log(
+                'SUCCESS: Query is present in the field Adminer will submit.'
+            );
+
+            await mgmtHold();
+
+            // ==================================================
+            // EXECUTE
+            // ==================================================
+            // Use Adminer's actual submit input.
+            const executeButton = adminerPage
+                .locator('input[type="submit"][value="Execute" i]')
+                .first();
+
+            await expect(executeButton).toBeVisible({
+                timeout: 10000
+            });
+
+            await expect(executeButton).toBeEnabled({
+                timeout: 10000
+            });
+
+            console.log('Clicking Adminer Execute button...');
+            await executeButton.click();
+
+            await adminerPage.waitForLoadState('domcontentloaded').catch(() => {});
+            await adminerPage.waitForTimeout(1200);
+
+            const bodyText = (await adminerPage.locator('body').innerText().catch(() => ''))
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            const sqlFailure = /error|syntax error|query failed|access denied|denied/i.test(bodyText) &&
+                !/0 rows? affected|\d+ rows? affected|query executed successfully/i.test(bodyText);
+
+            if (sqlFailure) {
+                throw new Error(`Adminer SQL execution appears to have failed: ${bodyText.slice(0, 5000)}`);
+            }
+
+            console.log('SUCCESS: RC_User extension cleanup SQL executed.');
+            console.log(`Adminer SQL result: ${bodyText.slice(0, 2000)}`);
+        } finally {
+            if (typeof adminerPage !== 'undefined' && adminerPage !== adminPage && !adminerPage.isClosed()) {
+                await adminerPage.close().catch(() => {});
+            }
+            if (!adminPage.isClosed()) {
+                await adminPage.close().catch(() => {});
+            }
+            console.log('Adminer cleanup tab closed.');
+        }
+    };
+
+    // ==================================================
     // 7. SEARCH EXISTING USERS
     // ==================================================
     await searchAutomationUsers();
@@ -1176,6 +2048,12 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
     // 8. DELETE EXISTING USERS
     // ==================================================
     await deleteAllFilteredUsers();
+
+    // ==================================================
+    // 8A. CLEAN OLD RC_USER EXTENSIONS FROM DATABASE
+    // ==================================================
+    await cleanupRcUserExtensionsInAdminer();
+    await hold();
 
     // ==================================================
     // 9. AUTOMATION USER CONFIGURATION
@@ -2384,11 +3262,13 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
                     ];
 
                 const selectedQueueOption =
-                    queueOptions.filter({
-                        hasText: new RegExp(
-                            `^${selectedQueueName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
-                        )
-                    }).first();
+                    queueOptions
+                        .filter({
+                            hasText: new RegExp(
+                                `^${selectedQueueName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
+                            )
+                        })
+                        .first();
 
                 await selectedQueueOption.click();
                 await hold();
@@ -2870,6 +3750,8 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
         // ==================================================
         // ADD USER
         // ==================================================
+        // If Add User is disabled, the account does not have user
+        // creation permission or no user-creation license is available.
         const addUserButton =
             page.getByRole('button', {
                 name: /add user/i
@@ -2878,6 +3760,17 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
         await expect(addUserButton).toBeVisible({
             timeout: 10000
         });
+
+        // If Add User is disabled, stop immediately with a clear reason.
+        // This normally indicates missing user-creation permission or no
+        // available license for creating another user.
+        const addUserEnabled = await addUserButton.isEnabled().catch(() => false);
+
+        if (!addUserEnabled) {
+            throw new Error(
+                'Pleasea check User creation permision not avilable or Licens for create user are exisd'
+            );
+        }
 
         await hold();
 
@@ -2898,9 +3791,11 @@ test('Intalk - Create 24 Automation Users', async ({ page }) => {
         // ==================================================
         // USERNAME
         // ==================================================
-        await page
+        const automationUsernameField = page
             .getByLabel('Username')
-            .fill(userName);
+            .first();
+
+        await automationUsernameField.fill(userName);
 
         await hold();
 
